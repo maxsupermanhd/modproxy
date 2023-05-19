@@ -37,6 +37,11 @@
 					"type": "pass",
 					"dest": "http://localhost:9872/abc.txt"
 				}
+			],
+			"/image.webp": [{
+					"type": "serveFile",
+					"path": "pepe.webp"
+				}
 			]
 		},
 		"default": [{

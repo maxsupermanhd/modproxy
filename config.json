@@ -1,0 +1,52 @@
+{
+	"listenControl": 8031,
+	"proxy": {
+		"listen": 8030,
+		"always": [{
+				"type": "log"
+			},{
+				"type": "headers",
+				"action": "add",
+				"headers": {
+					"server": "modproxy"
+				}
+			}
+		],
+		"paths": {
+			"/": [{
+					"type": "respond",
+					"headers": {
+						"content-type": "text/html; charset=utf-8"
+					},
+					"code": 200,
+					"data": "<h1>Index</h1><p>Привет мир!</p>\n"
+				},{
+					"type": "testAction"
+				}
+			],
+			"/favicon.ico": [{
+					"type": "serveFile",
+					"path": "/home/max/p/wz2100-autohost.net/static/favicon.ico"
+				}
+			],
+			"/test.html": [{
+					"type": "drop"
+				}
+			],
+			"/backend/testing.html": [{
+					"type": "pass",
+					"dest": "http://localhost:9872/abc.txt"
+				}
+			]
+		},
+		"default": [{
+				"type": "respond",
+				"headers": {
+					"content-type": "text/html; charset=utf-8"
+				},
+				"code": 404,
+				"data": "<h2>Not found</h2>\n"
+			}
+		]
+	}
+}

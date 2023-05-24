@@ -21,6 +21,7 @@ func main() {
 	proxyMux := &Mux{}
 	controlMux := http.NewServeMux()
 	controlMux.HandleFunc("/", indexHandler)
+	controlMux.HandleFunc("/sse", sseHandler)
 
 	log.Println("Starting HTTP servers...")
 	ctx, ShutdownFunc := context.WithCancel(context.Background())
@@ -33,14 +34,10 @@ func main() {
 	<-c
 
 	ShutdownFunc()
+	mon.stop <- struct{}{}
 	log.Println("Shutdown issued")
 	wg.Wait()
 	log.Println("Bye!")
-}
-
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(200)
-	w.Write([]byte(r.URL.String()))
 }
 
 func startHTTP(wg *sync.WaitGroup, ctx context.Context, addr string, mux http.Handler) {

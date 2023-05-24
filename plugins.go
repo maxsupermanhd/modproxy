@@ -31,14 +31,14 @@ func init() {
 			log.Println("Error getting exported actions: ", err)
 			continue
 		}
-		eactions, ok := ea.(*map[string]func(w http.ResponseWriter, _ *http.Request, _ map[string]interface{}) error)
+		eactions, ok := ea.(*map[string]func(w http.ResponseWriter, _ *http.Request, _ map[string]any) error)
 		if !ok {
 			log.Println("Exported actions don't match type")
 			continue
 		}
 		for k, v := range *eactions {
 			log.Printf("Added action %q from plugin %q", k, j.Name())
-			actionHandlers[k] = v
+			requestActionHandlers[k] = v
 		}
 	}
 }

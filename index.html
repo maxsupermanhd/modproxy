@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<style>
+			.withborder {
+				border: 1px solid;
+			}
+			.withborder td {
+				border: 1px solid;
+				min-width: 7rem;
+				padding: 3px;
+			}
+			.withborder tr {
+				border: 1px solid;
+			}
+		</style>
+	</head>
+	<body>
+		<div style="margin: 2rem;margin-left: 10%;margin-right: 10%;">
+			<table style="width:100%">
+				<tr>
+					<td><h4>Proxied requests</h4></td>
+					<td id="indicator" style="text-align: right;">Connecting...</td>
+				</tr>
+			</table>
+			<table class="withborder">
+				<thead>
+					<tr><td>
+						When
+					</td><td>
+						PT
+					</td><td>
+						Err
+					</td><td>
+						Status
+					</td><td>
+						From
+					</td><td>
+						To
+					</td><td>
+						User-Agent
+					</td></tr>
+				</thead>
+				<tbody id="toinsert">
+				</tbody>
+			</table>
+		</div>
+		<script>
+		function mktd(r, c) {
+			let td = document.createElement("td");
+			let cc = document.createElement("code");
+			td.appendChild(cc);
+			cc.innerText = c;
+			r.appendChild(td);
+		}
+
+		var firstConsumed = false;
+
+		const es = new EventSource("/sse");
+
+		es.onmessage = (event) => {
+			if(!firstConsumed) {
+				firstConsumed = true;
+				return;
+			}
+			let e = JSON.parse(event.data);
+			let r = document.createElement("tr");
+			mktd(r, e.When);
+			mktd(r, e.ProcessingTime);
+			mktd(r, e.Err);
+			mktd(r, e.ResponseCode);
+			mktd(r, e.SourceIP);
+			mktd(r, e.Path);
+			mktd(r, e.UserAgent);
+			document.getElementById("toinsert").prepend(r);
+		};
+		es.onopen = (event) => {
+			let i = document.getElementById("indicator");
+			i.innerText = "Connected"
+			i.style.color = "green"
+		}
+		es.onerror = (event) => {
+			let i = document.getElementById("indicator");
+			i.innerText = "Error"
+			i.style.color = "red"
+		}
+		</script>
+	</body>
+</html>

@@ -20,16 +20,16 @@ func (*rw) Write([]byte) (int, error) {
 }
 
 func TestActionHeaders(t *testing.T) {
-	at, ok := actionHandlers["headers"]
+	at, ok := requestActionHandlers["headers"]
 	if !ok {
 		t.FailNow()
 	}
 	w := rw{
 		header: map[string][]string{},
 	}
-	err := at(&w, nil, map[string]interface{}{
+	err := at(&w, nil, map[string]any{
 		"action": "add",
-		"headers": map[string]interface{}{
+		"headers": map[string]any{
 			"funny": "header",
 		},
 	})

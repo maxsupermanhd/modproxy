@@ -2,20 +2,31 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+)
+
+var (
+	errNoAction         = errors.New("action not found")
+	errWrongActionParam = errors.New("action parameter is wrong")
+	errHijackFailed     = errors.New("webserver doesn't support hijacking")
 )
 
 type Mux struct{}
 
-func (Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (Mux) ServeHTTP(ww http.ResponseWriter, r *http.Request) {
+	t := time.Now()
+	var respcode int
+	w := loggingResponseWriter{ResponseWriter: ww, ResponseCode: &respcode}
 	always, ok := getAlwaysActions()
 	if ok {
 		for i, v := range always {
-			err := processAction(w, r, v)
+			err := processRequestAction(w, r, v)
 			if err != nil {
 				log.Printf("Failed to process always-action %d: %v", i, err)
 				return
@@ -23,7 +34,7 @@ func (Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var actions []map[string]interface{}
+	var actions []map[string]any
 	p := []string{"proxy", "paths", r.URL.Path}
 	err := cf.GetToStruct(&actions, p...)
 	if err != nil {
@@ -34,11 +45,25 @@ func (Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Println("No defulat action found, dropping request:", err)
 		return
 	}
-	processActions(w, r, actions)
+	err = processRequestActions(w, r, actions)
+
+	errs := "N/E"
+	if err != nil {
+		errs = err.Error()
+	}
+	mon.e <- logRequest{
+		Err:            errs,
+		ResponseCode:   *w.ResponseCode,
+		UserAgent:      r.UserAgent(),
+		Path:           r.URL.Path,
+		SourceIP:       r.RemoteAddr,
+		When:           t.String(),
+		ProcessingTime: time.Since(t).String(),
+	}
 }
 
-func getAlwaysActions() ([]map[string]interface{}, bool) {
-	var aa []map[string]interface{}
+func getAlwaysActions() ([]map[string]any, bool) {
+	var aa []map[string]any
 	err := cf.GetToStruct(&aa, "proxy", "always")
 	if err != nil {
 		log.Println(err)
@@ -47,9 +72,9 @@ func getAlwaysActions() ([]map[string]interface{}, bool) {
 	return aa, true
 }
 
-func processActions(w http.ResponseWriter, r *http.Request, actions []map[string]interface{}) error {
+func processRequestActions(w http.ResponseWriter, r *http.Request, actions []map[string]any) error {
 	for i, action := range actions {
-		err := processAction(w, r, action)
+		err := processRequestAction(w, r, action)
 		if err != nil {
 			log.Printf("Failed to process always-action %d: %v", i, err)
 			return err
@@ -58,27 +83,38 @@ func processActions(w http.ResponseWriter, r *http.Request, actions []map[string
 	return nil
 }
 
-func processAction(w http.ResponseWriter, r *http.Request, action map[string]interface{}) error {
+func processRequestAction(w http.ResponseWriter, r *http.Request, action map[string]any) error {
 	t, ok := action["type"].(string)
 	if !ok {
 		log.Println("Got action that has no type")
 		return errNoAction
 	}
-	ah := actionHandlers[t]
+	ah := requestActionHandlers[t]
 	if ah != nil {
 		return ah(w, r, action)
 	}
 	return errNoAction
 }
 
-type actionHandler func(w http.ResponseWriter, r *http.Request, action map[string]interface{}) error
+func processResponseAction(w http.ResponseWriter, r *http.Response, action map[string]any) error {
+	t, ok := action["type"].(string)
+	if !ok {
+		log.Println("Got action that has no type")
+		return errNoAction
+	}
+	ah := responseActionsHandlers[t]
+	if ah != nil {
+		return ah(w, r, action)
+	}
+	return errNoAction
+}
+
+type requestActionHandler func(w http.ResponseWriter, r *http.Request, action map[string]any) error
+type responseActionHandler func(w http.ResponseWriter, r *http.Response, action map[string]any) error
 
 var (
-	errNoAction         = errors.New("action not found")
-	errWrongActionParam = errors.New("action parameter is wrong")
-	errHijackFailed     = errors.New("webserver doesn't support hijacking")
-	actionHandlers      = map[string]actionHandler{
-		"drop": func(w http.ResponseWriter, _ *http.Request, _ map[string]interface{}) error {
+	requestActionHandlers = map[string]requestActionHandler{
+		"drop": func(w http.ResponseWriter, _ *http.Request, _ map[string]any) error {
 			hj, ok := w.(http.Hijacker)
 			if !ok {
 				log.Println("webserver doesn't support hijacking?")
@@ -90,13 +126,12 @@ var (
 			}
 			return conn.Close()
 		},
-		"log": func(_ http.ResponseWriter, r *http.Request, action map[string]interface{}) error {
-			vars := []interface{}{
+		"log": func(_ http.ResponseWriter, r *http.Request, action map[string]any) error {
+			vars := []any{
 				r.Proto,
 				r.Method,
 				r.URL.Path,
 				r.UserAgent(),
-				r.ContentLength,
 				r.Referer(),
 			}
 			if action["fmt"] == nil {
@@ -110,8 +145,8 @@ var (
 			log.Printf(fmtstr, vars)
 			return nil
 		},
-		"respond": func(w http.ResponseWriter, _ *http.Request, action map[string]interface{}) error {
-			headers, ok := action["headers"].(map[string]interface{})
+		"respond": func(w http.ResponseWriter, _ *http.Request, action map[string]any) error {
+			headers, ok := action["headers"].(map[string]any)
 			if ok {
 				for k, vv := range headers {
 					v, ok := vv.(string)
@@ -134,7 +169,7 @@ var (
 			}
 			return err
 		},
-		"serveFile": func(w http.ResponseWriter, r *http.Request, action map[string]interface{}) error {
+		"serveFile": func(w http.ResponseWriter, r *http.Request, action map[string]any) error {
 			path, ok := action["path"].(string)
 			if !ok {
 				return errWrongActionParam
@@ -142,14 +177,14 @@ var (
 			http.ServeFile(w, r, path)
 			return nil
 		},
-		"headers": func(w http.ResponseWriter, _ *http.Request, action map[string]interface{}) error {
+		"headers": func(w http.ResponseWriter, _ *http.Request, action map[string]any) error {
 			op, ok := action["action"].(string)
 			if !ok {
 				return errWrongActionParam
 			}
 			switch op {
 			case "add":
-				headers, ok := action["headers"].(map[string]interface{})
+				headers, ok := action["headers"].(map[string]any)
 				if !ok {
 					return errWrongActionParam
 				}
@@ -173,7 +208,7 @@ var (
 			}
 			return nil
 		},
-		"pass": func(w http.ResponseWriter, r *http.Request, action map[string]interface{}) error {
+		"pass": func(w http.ResponseWriter, r *http.Request, action map[string]any) error {
 			to, ok := action["dest"].(string)
 			if !ok {
 				return errWrongActionParam
@@ -205,6 +240,20 @@ var (
 			if err != nil {
 				return err
 			}
+			afteractions, ok := action["after"].([]any)
+			if !ok {
+				return errWrongActionParam
+			}
+			for _, aafteraction := range afteractions {
+				afteraction, ok := aafteraction.(map[string]any)
+				if !ok {
+					return errWrongActionParam
+				}
+				err = processResponseAction(w, resp, afteraction)
+				if err != nil {
+					return err
+				}
+			}
 			for k, vv := range resp.Header {
 				for _, v := range vv {
 					w.Header().Add(k, v)
@@ -218,6 +267,26 @@ var (
 			_, err = w.Write(b)
 			if err != nil {
 				return err
+			}
+			return nil
+		},
+	}
+	responseActionsHandlers = map[string]responseActionHandler{
+		"check": func(_ http.ResponseWriter, r *http.Response, action map[string]any) error {
+			wh, ok := action["what"].(string)
+			if !ok {
+				return errWrongActionParam
+			}
+			switch wh {
+			case "code":
+				ccode, ok := action["shouldBe"].(float64)
+				if !ok {
+					return errWrongActionParam
+				}
+				if r.StatusCode == int(ccode) {
+					return nil
+				}
+				return fmt.Errorf("status code check failed (%d != %d)", r.StatusCode, int(ccode))
 			}
 			return nil
 		},

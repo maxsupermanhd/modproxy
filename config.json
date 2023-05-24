@@ -3,13 +3,15 @@
 	"proxy": {
 		"listen": 8030,
 		"always": [{
-				"type": "log"
-			},{
-				"type": "headers",
-				"action": "add",
-				"headers": {
-					"server": "modproxy"
-				}
+					"type": "log"
+				},{
+					"type": "headers",
+					"action": "add",
+					"headers": {
+						"server": "modproxy"
+					}
+				}, {
+				"type": "testAction"
 			}
 		],
 		"paths": {
@@ -19,9 +21,7 @@
 						"content-type": "text/html; charset=utf-8"
 					},
 					"code": 200,
-					"data": "<h1>Index</h1><p>Привет мир!</p>\n"
-				},{
-					"type": "testAction"
+					"data": "Server status: online\n"
 				}
 			],
 			"/favicon.ico": [{
@@ -41,7 +41,20 @@
 			"/image.webp": [{
 					"type": "serveFile",
 					"path": "pepe.webp"
-				}
+			},{
+				"type": "pass",
+				"dest": "http://localhost:80/health",
+				"after": [{
+					"type": "sed",
+					"body": "s/OK/{\"status\": \"healthy\"}/g"
+				},{
+					"type": "headers",
+					"actions": "add",
+					"headers": {
+						"content-type": "text/json"
+					}
+				}]
+			}
 			]
 		},
 		"default": [{
